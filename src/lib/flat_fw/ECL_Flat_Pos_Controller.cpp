@@ -133,7 +133,7 @@ void ECL_Flat_Pos_Controller::calc_dyn_inv_sp(){
 	float C = _cos_aoa;
 	float D = -aT*_sin_aoa-_rho*_Aref*_r*vnorm*vnorm*cL*_cLa;
 	float E = -_sin_aoa;
-	float F = -aT*_cos_aoa-0.5*_rho*vnorm*vnorm*_Aref*_cLa;
+	float F = -aT*_cos_aoa-0.5f*_rho*vnorm*vnorm*_Aref*_cLa;
 
 	Vector2f av13r(_av1r_sp+A, _av3r_sp+B);
 	float CDEF[4] = {C,D,E,F};

@@ -49,6 +49,7 @@
 #include <uORB/topics/vehicle_control_mode.h>
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/uORB.h>
+#include <lib/flat_fw/ECL_Flat_Pos_Controller.hpp>
 
 class FixedwingFlatControl final : public ModuleBase<FixedwingFlatControl>, public ModuleParams,
 	public px4::WorkItem

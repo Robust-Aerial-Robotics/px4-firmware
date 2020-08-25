@@ -1,6 +1,6 @@
 ############################################################################
 #
-#   Copyright (c) 2015 PX4 Development Team. All rights reserved.
+#   Copyright (c) 2018-2020 PX4 Development Team. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -30,14 +30,11 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 ############################################################################
-px4_add_module(
-	MODULE modules__fw_flat_control
-	MAIN fw_flat_control
-	SRCS
-		FixedwingFlatControl.cpp
-		FixedwingFlatControl.hpp
 
-	DEPENDS
-		px4_work_queue
-		flat_fw
-	)
+px4_add_library(flat_fw
+	ECL_Flat_Pos_Controller.cpp
+	ECL_Flat_Pos_Controller.hpp
+)
+
+# add_dependencies(flat_fw git_ecl)
+# target_link_libraries(flat_fw PRIVATE ecl_geo)
