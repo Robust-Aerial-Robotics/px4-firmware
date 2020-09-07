@@ -102,11 +102,11 @@ class ECL_Flat_Pos_Controller{
 		Quatf _q_wrld_bdy;								///< Quaternion describing the yaw-pitch-roll, 3-2-1 intrinsic rotation from world frame to body frame
 		Vector3f _wrld_w_bdy;							///< Angular velocity of body WRT world, expressed in frd coords
 
-		float _cLa{0.11f};
-		float _cL0{0.0f};
+		float _cLa{3.98f};
+		float _cL0{0.462f};
 		float _r{0.1f};
-		float _cD0{0.0f};
-		float _Aref{1.0f};
+		float _cD0{0.04f};
+		float _Aref{0.39755f};
 		float _rho{1.2041f};
 
 		// Intermediates
