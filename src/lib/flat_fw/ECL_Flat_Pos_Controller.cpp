@@ -101,21 +101,33 @@ void ECL_Flat_Pos_Controller::calc_att(){
 }
 
 void ECL_Flat_Pos_Controller::calc_flat_sp(){
+	// s tracks path
+	// float veldN = _veld.norm();
+	// float veldN2 = veldN*veldN;
+	// float veldN3 = veldN2*veldN;
+	// float s_dot = _vel.dot(_veld)/veldN2
+	// float s_ddot = ( veldN*(_acc.dot(_veld)+_vel.dot(_accd)*s_dot) - _vel.dot(_veld)*s_dot*_veld.dot(_accd)/veldN )/veldN3 - _accd.dot(_veld)*s_dot*s_dot/veldN2;
+
+	// s tracks vehicle
+	float veldN = _veld.norm();
+	float s_dot = _vel.norm()/veldN;
+	float s_ddot = (veldN*_acc.norm() - _vel.norm()*_accd.norm()*s_dot)/(veldN*veldN);
+
 	Vector3f path_error_0 = _posd - _pos;
-	Vector3f path_error_1 = _veld - _vel;
-	Vector3f path_error_2 = _accd - _acc;
+	Vector3f path_error_1 = _veld*s_dot - _vel;
+	Vector3f path_error_2 = _accd*s_dot*s_dot+_veld*s_ddot - _acc;
 
 	Quatf q_vel_bdy = Quatf(Eulerf(0, _aoa, -_sideslip)).inversed(); // 3-2-1 sequence from "frame 1" (velocity frame) to "frame 2" (body frame)
 	Quatf q_vel_wrld = _q_bdy_wrld*q_vel_bdy;
 	Vector3f av = q_vel_wrld.conjugate_inversed(_acc-_g);
-	Vector3f rotU = q_vel_wrld.conjugate_inversed(_jerd+_K2_FLAT*path_error_2+_K1_FLAT*path_error_1+_K0_FLAT*path_error_0);
+	Vector3f rotU = q_vel_wrld.conjugate_inversed(3.0f*_accd*s_ddot*s_dot+_jerd*s_dot*s_dot*s_dot + _K2_FLAT*path_error_2+_K1_FLAT*path_error_1+_K0_FLAT*path_error_0); // TODO: why no _veld*s_dddot ?
+	Vector3f rotVeld = q_vel_wrld.conjugate_inversed(_veld);
 
-	Vector3f flatOmegas(-_pitchr*av(2), _yawr*av(0)/av(2), _pitchr*av(0));
-	float decoupleInit[9] = {1,0,0, 0,-1/av(2),0, 0,0,1};
-	SquareMatrix<float,3> decoupleM(decoupleInit);
+	Vector3f flatOmegas(_pitchr*av(2), _yawr*av(0), -_pitchr*av(0)); // TODO: add effect of acceleration rate in x
+	float decoupleInit[9] = {rotVeld(0),0,0, rotVeld(1),av(2),0, rotVeld(2),0,-1};
+	SquareMatrix<float,3> decoupleM_inv = SquareMatrix<float,3>(decoupleInit).I();
 
-	Vector3f flatout = flatOmegas + decoupleM*rotU;
-	_av1r_sp = flatout(0);
+	Vector3f flatout = decoupleM_inv*(flatOmegas - rotU);
 	_rollr_sp = flatout(1);
 	_av3r_sp = flatout(2);
 }
@@ -125,23 +137,7 @@ void ECL_Flat_Pos_Controller::calc_dyn_inv_sp(){
 
 	float aT = ab(0);
 
-	float cL = _cLa*_aoa + _cL0;
-	float vnorm = _vel.norm();
-
-	float A = _rho*_Aref*_vel.dot(_acc)*(_cD0+_r*cL*cL);
-	float B = _rho*_Aref*_vel.dot(_acc)*cL;
-	float C = _cos_aoa;
-	float D = -aT*_sin_aoa-_rho*_Aref*_r*vnorm*vnorm*cL*_cLa;
-	float E = -_sin_aoa;
-	float F = -aT*_cos_aoa-0.5f*_rho*vnorm*vnorm*_Aref*_cLa;
-
-	Vector2f av13r(_av1r_sp+A, _av3r_sp+B);
-	float CDEF[4] = {C,D,E,F};
-	SquareMatrix<float,2> M(CDEF);
-	Vector2f aTrAoAr_sp = M.I()*av13r;
-
-	_thrustr_sp = aTrAoAr_sp(0);
-	_aoar_sp = aTrAoAr_sp(1);
+	_aoar_sp = -_av3r_sp/(aT*_cos_aoa + _cLa);
 }
 
 void ECL_Flat_Pos_Controller::calc_sideslipr_sp(){

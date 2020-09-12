@@ -61,3 +61,45 @@ PARAM_DEFINE_FLOAT(FW_ACRO_FLAT_K1, 3.0f);
  *
  */
 PARAM_DEFINE_FLOAT(FW_ACRO_FLAT_K2, 3.0f);
+
+/**
+ * Acro gain: acceleration WRT body in thrust dir. error ==> thrust setpoint - cruising thrust.
+ *
+ */
+PARAM_DEFINE_FLOAT(FW_ACRO_AT_GAIN, 1.0f);
+
+/**
+ * Acro lift curve slope for dynamic inversion (forces are in newtons).
+ *
+ */
+PARAM_DEFINE_FLOAT(FW_ACRO_CLA, 3.98f);
+
+/**
+ * Acro 3D lift coeff. at 0 AoA for dynamic inversion (forces are in newtons).
+ *
+ */
+PARAM_DEFINE_FLOAT(FW_ACRO_CL0, 0.462f);
+
+/**
+ * Acro drag polar coefficient (cD = cD0+r*cL^2) (forces are in newtons).
+ *
+ */
+PARAM_DEFINE_FLOAT(FW_ACRO_R, 0.1f);
+
+/**
+ * Acro 3D drag coefficient at 0 lift (forces are in newtons).
+ *
+ */
+PARAM_DEFINE_FLOAT(FW_ACRO_CD0, 0.04f);
+
+/**
+ * Acro reference area for aerodynamic coefficients.
+ *
+ */
+PARAM_DEFINE_FLOAT(FW_ACRO_AREF, 0.39755f);
+
+/**
+ * Acro air density (kg/m^3).
+ *
+ */
+PARAM_DEFINE_FLOAT(FW_ACRO_RHO, 1.2041f);

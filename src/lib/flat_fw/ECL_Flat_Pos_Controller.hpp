@@ -69,6 +69,12 @@ class ECL_Flat_Pos_Controller{
 		 * s^3 + k2*s^2 + k1*s + k0 is Hurwitz for stable tracking [1].
 		 */
 		void set_flat_gains(float k0, float k1, float k2) { _K0_FLAT=k0; _K1_FLAT=k1; _K2_FLAT=k2;}
+		void set_cLa(float cLa) { _cLa = cLa;}
+		void set_cL0(float cL0) { _cL0 = cL0;}
+		void set_r(float r) { _r = r;}
+		void set_cD0(float cD0) { _cD0 = cD0;}
+		void set_Aref(float Aref) { _Aref = Aref;}
+		void set_rho(float rho) { _rho = rho;}
 
 		void update_pos(Vector3f pos, Vector3f vel, Vector3f acc);
 		void update_pos_sp(Vector3f posd, Vector3f veld, Vector3f accd, Vector3f jerd);
@@ -78,7 +84,7 @@ class ECL_Flat_Pos_Controller{
 		void calc_all();
 
 		Vector3f get_omega_b_setpoint() { return _omega_sp; }
-		float get_thrustr_setpoint() { return _thrustr_sp; }
+		float get_s_dot() { return _s_dot; }
 
 	private:
 		// Constants
@@ -130,8 +136,7 @@ class ECL_Flat_Pos_Controller{
 		float _av3r_sp;									///< Setpoint of acceleration rate opposite of lift direction in m/s^2
 
 		// Outputs
-		float _thrustr_sp;								///< Thrust rate setpoint in m/s^3
-		
+		float _s_dot{1.0f};								///< Time rate of change of path parameter (1.0 when traveling at desired speed)
 		Vector3f _omega_sp; 							///< Setpoint of angular velocity of body frame WRT world frame. Expressed in frd coordinates, rad/s
 
 		// Functions

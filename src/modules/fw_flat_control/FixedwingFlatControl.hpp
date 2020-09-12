@@ -94,6 +94,7 @@ private:
 	void update_roll_act(float dt);
 	void update_pitch_act(float dt);
 	void update_yaw_act(float dt);
+	void update_thrust(float dt, Quatf att, Vector3f acc);
 
 	orb_advert_t	_mavlink_log_pub{nullptr};
 
@@ -150,25 +151,39 @@ private:
 	float _yawr_act_sp{0.0f};
 	float _int_yawr{0.0f};
 
+	// float _aT_sp{0.0f};
+
 	float _roll_max_rate{0.0f};
 	float _pitch_max_rate{0.0f};
 	float _yaw_max_rate{0.0f};
 
+	float _s{0.0f};
 	hrt_abstime _last_run;
-	float _init_spd;
 	float _thrustr_sp;
 
 	float _airspeed_scaling{1.0f};
 
+	Vector3f _g = Vector3f(0.0f,0.0f,9.80665f);
+
 	Vector3f _attr;
 	Vector3f _omega_b_sp;
 
-	Vector3f _init_dir;
+	Vector3f _init_vel;
 	Vector3f _init_pos;
 
 	ECL_Flat_Pos_Controller _flat_control;
 
 	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::FW_ACRO_CLA>) _param_fw_acro_cLa,
+		(ParamFloat<px4::params::FW_ACRO_CL0>) _param_fw_acro_cL0,
+		(ParamFloat<px4::params::FW_ACRO_R>) _param_fw_acro_r,
+		(ParamFloat<px4::params::FW_ACRO_CD0>) _param_fw_acro_cD0,
+		(ParamFloat<px4::params::FW_ACRO_AREF>) _param_fw_acro_Aref,
+		(ParamFloat<px4::params::FW_ACRO_RHO>) _param_fw_acro_rho,
+
+		(ParamFloat<px4::params::FW_THR_CRUISE>) _param_fw_thr_cruise,
+		// (ParamFloat<px4::params::FW_ACRO_AT_GAIN>) _param_fw_acro_at_gain,
+
 		(ParamFloat<px4::params::FW_ACRO_FLAT_K0>) _param_fw_acro_flat_k0,
 		(ParamFloat<px4::params::FW_ACRO_FLAT_K1>) _param_fw_acro_flat_k1,
 		(ParamFloat<px4::params::FW_ACRO_FLAT_K2>) _param_fw_acro_flat_k2,

@@ -103,6 +103,12 @@ FixedwingFlatControl::parameters_update()
 								_param_fw_acro_flat_k1.get(),
 								_param_fw_acro_flat_k2.get()
 								);
+	_flat_control.set_cLa(_param_fw_acro_cLa.get());
+	_flat_control.set_cL0(_param_fw_acro_cL0.get());
+	_flat_control.set_r(_param_fw_acro_r.get());
+	_flat_control.set_cD0(_param_fw_acro_cD0.get());
+	_flat_control.set_Aref(_param_fw_acro_Aref.get());
+	_flat_control.set_rho(_param_fw_acro_rho.get());
 
 	// /* wheel control parameters */
 	// _wheel_ctrl.set_k_p(_param_fw_wr_p.get());
@@ -139,7 +145,7 @@ void
 FixedwingFlatControl::Run()
 {
 	if(!_started){	
-		PX4_INFO("FIRST RUN OF FLAT CONTROL!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+		PX4_INFO("FIRST RUN OF FLAT CONTROL\n");
 		_started = true;
 	}
 
@@ -230,7 +236,7 @@ void
 FixedwingFlatControl::vehicle_manual_poll()
 {
 	if(!_started_manual){	
-		PX4_INFO("NO MANUAL CONTROL!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+		PX4_INFO("NO MANUAL CONTROL YET\n");
 	}
 
 	// const bool is_tailsitter_transition = _is_tailsitter && _vehicle_status.in_transition_mode;
@@ -256,29 +262,10 @@ FixedwingFlatControl::vehicle_manual_poll()
 				if (_vcontrol_mode.flag_control_attitude_enabled) {
 
 					if(!_started_stable){	
-						PX4_INFO("STARTED STABLE ATT CONTROL!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+						PX4_INFO("STARTED STABLE ATT CONTROL\n");
 						_started_stable = true;
 					}
-					// STABILIZED mode generate the attitude setpoint from manual user inputs
-
-					// _att_sp.roll_body = _manual_control_setpoint.y * radians(_param_fw_man_r_max.get()) + radians(_param_fw_rsp_off.get());
-					// _att_sp.roll_body = constrain(_att_sp.roll_body,
-					// 			      -radians(_param_fw_man_r_max.get()), radians(_param_fw_man_r_max.get()));
-
-					// _att_sp.pitch_body = -_manual_control_setpoint.x * radians(_param_fw_man_p_max.get())
-					// 		     + radians(_param_fw_psp_off.get());
-					// _att_sp.pitch_body = constrain(_att_sp.pitch_body,
-					// 			       -radians(_param_fw_man_p_max.get()), radians(_param_fw_man_p_max.get()));
-
-					// _att_sp.yaw_body = 0.0f;
-					// _att_sp.thrust_body[0] = _manual_control_setpoint.z;
-
-					// Quatf q(Eulerf(_att_sp.roll_body, _att_sp.pitch_body, _att_sp.yaw_body));
-					// q.copyTo(_att_sp.q_d);
-
-					// _att_sp.timestamp = hrt_absolute_time();
-
-					// _attitude_sp_pub.publish(_att_sp);
+					// STABILIZED mode fly in a straight line at constant altitude
 
 					perf_end(_flat_freq_perf);
 					perf_begin(_flat_freq_perf);
@@ -296,8 +283,7 @@ FixedwingFlatControl::vehicle_manual_poll()
 					if(_init_stable){
 						PX4_INFO("Initialized stabilizer.\n");
 						_init_stable = false;
-						_init_spd = vel.norm();
-						_init_dir = Vector3f(vel(0),vel(1),0)/_init_spd;
+						_init_vel = Vector3f(vel(0),vel(1),0);
 						_init_pos = pos;
 
 						_int_rollr = 0.0f;
@@ -307,12 +293,20 @@ FixedwingFlatControl::vehicle_manual_poll()
 						_rollr_act_sp = 0.0f;
 						_pitchr_act_sp = 0.0f;
 						_yawr_act_sp = 0.0f;
+						// _aT_sp = 0.0f;
 
 						_last_run = hrt_absolute_time();
+						_s = 0;
 					}
 
-					Vector3f posd =  _init_dir.dot(pos-_init_pos)*_init_dir+_init_pos;
-					Vector3f veld = _init_spd*_init_dir;
+					/* get the usual dt estimate */
+					uint64_t dt_micros = hrt_elapsed_time(&_last_run);
+					_last_run = hrt_absolute_time();
+					float dt = (float)dt_micros * 1e-6f;
+
+					_s += dt*_flat_control.get_s_dot();
+					Vector3f posd = _init_vel*_s+_init_pos;
+					Vector3f veld = _init_vel;
 					Vector3f accd = Vector3f(0,0,0);
 					Vector3f jerd = Vector3f(0,0,0);
 
@@ -323,10 +317,20 @@ FixedwingFlatControl::vehicle_manual_poll()
 					_flat_control.calc_all();
 
 					_omega_b_sp = _flat_control.get_omega_b_setpoint();
-					_thrustr_sp = _flat_control.get_thrustr_setpoint();
+
+					// matrix::Eulerf euler_att = matrix::Eulerf(att);
+					// PX4_INFO("Body Rate: %f, %f, %f", (double)_attr(0), (double)_attr(1), (double)_attr(2));
+					// PX4_INFO("Euler Angles: %f, %f, %f", (double)euler_att.phi(), (double)euler_att.theta(), (double)euler_att.psi());
+					// PX4_INFO("Actual pos.: %f, %f, %f", (double)pos(0), (double)pos(1), (double)pos(2));
+					// PX4_INFO("Desired pos.: %f, %f, %f", (double)posd(0), (double)posd(1), (double)posd(2));
+					// PX4_INFO("Actual vel.: %f, %f, %f", (double)vel(0), (double)vel(1), (double)vel(2));
+					// PX4_INFO("Desired vel.: %f, %f, %f", (double)veld(0), (double)veld(1), (double)veld(2));
+					// PX4_INFO("Actual acc.: %f, %f, %f", (double)acc(0), (double)acc(1), (double)acc(2));
+					// PX4_INFO("Desired acc.: %f, %f, %f", (double)accd(0), (double)accd(1), (double)accd(2));
+					// PX4_INFO("THRUSTR SP: %f", (double)_thrustr_sp);
 
 					if(!_started_stabler){	
-						PX4_INFO("STARTED STABLE RATE CONTROL!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+						PX4_INFO("STARTED STABLE RATE CONTROL\n");
 						_started_stabler = true;
 					}
 
@@ -334,33 +338,30 @@ FixedwingFlatControl::vehicle_manual_poll()
 					perf_begin(_attr_freq_perf);
 					get_airspeed_and_update_scaling();
 
-					/* get the usual dt estimate */
-					uint64_t dt_micros = hrt_elapsed_time(&_last_run);
-					_last_run = hrt_absolute_time();
-					float dt = (float)dt_micros * 1e-6f;
-
 					/* zero time integration of this step for long intervals*/
 					if(dt > 500000){
 						update_roll_act(0);
 						update_pitch_act(0);
 						update_yaw_act(0);
+						update_thrust(0,att,acc);
 					}else{
 						update_roll_act(dt);
 						update_pitch_act(dt);
-						update_yaw_act(dt);	
+						update_yaw_act(dt);
+						update_thrust(dt,att,acc);	
 					}
 
-				} else if (_vcontrol_mode.flag_control_rates_enabled &&
-					   !_vcontrol_mode.flag_control_attitude_enabled) {
+				// } else if (_vcontrol_mode.flag_control_rates_enabled &&
+				// 	   !_vcontrol_mode.flag_control_attitude_enabled) {
 
-					// // RATE mode we need to generate the rate setpoint from manual user inputs
-					// _rates_sp.timestamp = hrt_absolute_time();
-					// _rates_sp.roll = _manual_control_setpoint.y * radians(_param_fw_acro_x_max.get());
-					// _rates_sp.pitch = -_manual_control_setpoint.x * radians(_param_fw_acro_y_max.get());
-					// _rates_sp.yaw = _manual_control_setpoint.r * radians(_param_fw_acro_z_max.get());
-					// _rates_sp.thrust_body[0] = _manual_control_setpoint.z;
+				// 	// RATE mode we need to generate the rate setpoint from manual user inputs
+				// 	_rates_sp.timestamp = hrt_absolute_time();
+				// 	_rates_sp.roll = _manual_control_setpoint.y * radians(_param_fw_acro_x_max.get());
+				// 	_rates_sp.pitch = -_manual_control_setpoint.x * radians(_param_fw_acro_y_max.get());
+				// 	_rates_sp.yaw = _manual_control_setpoint.r * radians(_param_fw_acro_z_max.get());
+				// 	_rates_sp.thrust_body[0] = _manual_control_setpoint.z;
 
-					// _rate_sp_pub.publish(_rates_sp);
+				// 	_rate_sp_pub.publish(_rates_sp);
 
 				} else {
 					perf_cancel(_flat_freq_perf);
@@ -379,7 +380,7 @@ FixedwingFlatControl::vehicle_manual_poll()
 					_actuators.control[actuator_controls_s::INDEX_THROTTLE] = _manual_control_setpoint.z;
 
 					if(!_started_manual){	
-						PX4_INFO("STARTED MANUAL CONTROL!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+						PX4_INFO("STARTED MANUAL CONTROL\n");
 						_started_manual = true;
 					}
 				}
@@ -460,6 +461,20 @@ void FixedwingFlatControl::update_yaw_act(float dt){
 	_actuators.control[actuator_controls_s::INDEX_YAW] = _yawr_act_sp + _param_trim_yaw.get();
 }
 
+void FixedwingFlatControl::update_thrust(float dt, Quatf att, Vector3f acc){
+	// _aT_sp = _aT_sp + _thrustr_sp*dt;
+
+	// Vector3f ab = att.conjugate_inversed(acc-_g); // acceleration WRT v frame expressed in body coordinates
+	// float aT = ab(0);
+
+	// float thrust_sp = _param_fw_thr_cruise.get() + _param_fw_acro_at_gain.get()*(_aT_sp-aT);
+	// thrust_sp = thrust_sp > 1.0f ? 1.0f : thrust_sp;
+	// thrust_sp = thrust_sp < 0.0f ? 0.0f : thrust_sp;
+
+	// pass through manual throttle for now..
+	_actuators.control[actuator_controls_s::INDEX_THROTTLE] = _manual_control_setpoint.z;
+}
+
 int FixedwingFlatControl::task_spawn(int argc, char *argv[])
 {
 	bool vtol = false;
@@ -498,8 +513,6 @@ int FixedwingFlatControl::print_status()
 	perf_print_counter(_flat_freq_perf);
 	perf_print_counter(_attr_freq_perf);
 
-	// PX4_INFO("Mean run duration: %f (s)", _loop_perf.mean);
-	// PX4_INFO("Mean runtime: %f (s)", _loop_perf.mean);
 	// TODO: print additional runtime information about the state of the module
 
 	return 0;
