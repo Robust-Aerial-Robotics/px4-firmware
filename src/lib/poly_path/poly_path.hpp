@@ -33,11 +33,16 @@
 
 /**
  * @file poly_path.hpp
- *
- * Definition of a 1D path constructed from a sequence of polynomials.
+ * Implementation of a 1D path constructed from a sequence of polynomials.
  *
  * @author Kevin Cohen <kevincohen35@gmail.com>
+ * Acknowledgements and References:
+ *    Optimal polynomial construction from fixed conditions is based on the approach discussed in [1].
  *
+ *    [1] Bry, A., Richter, C., Bachrach, A., and Roy, N., “Aggressive flight of fixed-wing and quadrotor aircraft in dense indoor environments,”
+ *    The International Journal of Robotics Research, Vol. 34, No. 7, 2015, pp. 969–1002. https://doi.org/10.1177/0278364914558129, 
+ *    URL https://doi.org/10.1177/0278364914558129.
+ *    
  */
 
 template <int numCoeff>
@@ -61,17 +66,18 @@ template <int numCoeff, int numPoly>
 class Poly_Path{
 	public:
 		Poly_Path(float taus[], Polynomial<numCoeff> polyList[]); // Construct path from leg durations and corresponding polynomial
+		Poly_Path(float taus[], float ics[], float points[], float costs[]);
 		void getEval(float t, float* derivs); // Evaluate a derivative of the path at t. Select order with derivs
-		// TODO: Generate Poly_Path from waypoints
-	private:
-		void _genDerivs(); // Sets _polyList1, polyList2, polyList3
-		float _cumTau[numPoly];
-		float _taus[numPoly];
-
 		Polynomial<numCoeff> _polyList0[numPoly]; // List of polynomials
 		Polynomial<numCoeff> _polyList1[numPoly]; // 1st derivative of _polyList0
 		Polynomial<numCoeff> _polyList2[numPoly]; // 2nd derivative of _polyList0
 		Polynomial<numCoeff> _polyList3[numPoly]; // 3rd derivative of _polyList0
+
+	private:
+		float _dP_dp(float t, int r, int n);
+		void _genDerivs(); // Sets _polyList1, polyList2, polyList3
+		float _cumTau[numPoly];
+		float _taus[numPoly];
 
 		int _numCoeff;
 		int _numPoly;
