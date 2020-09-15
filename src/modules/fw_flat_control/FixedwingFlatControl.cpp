@@ -42,6 +42,7 @@ using math::max;
 using math::min;
 using math::constrain;
 using math::radians;
+using matrix::Vector2f;
 using namespace time_literals;
 
 FixedwingFlatControl::FixedwingFlatControl(bool vtol) :
@@ -297,6 +298,57 @@ FixedwingFlatControl::vehicle_manual_poll()
 
 						_last_run = hrt_absolute_time();
 						_s = 0;
+
+						float legLen = _param_fw_acro_hld_len.get();
+
+						// Build matrix to rotate square points based path template
+						// Vector2f init_dir = Vector2f(_init_vel(0),_init_vel(1));
+						// init_dir = init_dir/init_dir.norm();
+
+						float hdg = atan2(_init_vel(1),_init_vel(0));
+						float pathRot_data[2][2] =	{
+													{cos(hdg),-sin(hdg)},
+													{sin(hdg), cos(hdg)},
+													};
+						matrix::SquareMatrix<float, 2> pathRot(pathRot_data);
+
+						Vector2f pathOffset(_init_pos(0),_init_pos(1));
+
+						Vector2f pt1 = pathRot*Vector2f(legLen	,0		)	+ pathOffset;
+						Vector2f pt2 = pathRot*Vector2f(legLen	,legLen	)	+ pathOffset;
+						Vector2f pt3 = pathRot*Vector2f(0		,legLen	)	+ pathOffset;
+						Vector2f pt4 = pathRot*Vector2f(0		,0		)	+ pathOffset;
+
+						float tau = legLen/vel.norm();
+						float taus[4] = {tau,tau,tau,tau};
+						float costs[7] = {0,0,1,1,0,0,0};
+
+						// PX4_INFO("x_pts: %f, %f, %f, %f\n", (double)x_pts[0],(double)x_pts[1],(double)x_pts[2],(double)x_pts[3]);
+						// PX4_INFO("x_ics: %f, %f, %f, %f\n", (double)x_ics[0],(double)x_ics[1],(double)x_ics[2],(double)x_ics[3]);
+						// PX4_INFO("costs: %f, %f, %f, %f, %f, %f, %f\n", (double)costs[0],(double)costs[1],(double)costs[2],(double)costs[3],(double)costs[4],(double)costs[5],(double)costs[6]);
+						// PX4_INFO("taus: %f, %f, %f, %f\n", (double)taus[0],(double)taus[1],(double)taus[2],(double)taus[3]);
+						
+						float x_pts[4] = {pt1(0),pt2(0),pt3(0),pt4(0)};
+						float x_ics[4] = {pos(0),vel(0),acc(0),0}; // TODO: account for initial jerk
+						_x_path = Poly_Path<7,4>(taus, x_ics, x_pts, costs);
+
+						float y_pts[4] = {pt1(1),pt2(1),pt3(1),pt4(1)};
+						float y_ics[4] = {pos(1),vel(1),acc(1),0}; // TODO: account for initial jerk
+						_y_path = Poly_Path<7,4>(taus, y_ics, y_pts, costs);
+						
+						float z_pts[4] = {pos(2),pos(2),pos(2),pos(2)};
+						float z_ics[4] = {pos(2),vel(2),acc(2),0}; // TODO: account for initial jerk
+						_z_path = Poly_Path<7,4>(taus, z_ics, z_pts, costs); // TODO: there may be a better set of weights for the z-direction
+						
+
+						for(int legNum=0; legNum<4; legNum++){
+							const float* x_coeffs = _x_path._polyList0[legNum].getCoeffs();
+							PX4_INFO("x coeffs: %f, %f, %f, %f, %f, %f, %f\n", (double)x_coeffs[0],(double)x_coeffs[1],(double)x_coeffs[2],(double)x_coeffs[3],(double)x_coeffs[4],(double)x_coeffs[5],(double)x_coeffs[6]);
+							const float* y_coeffs = _y_path._polyList0[legNum].getCoeffs();
+							PX4_INFO("y coeffs: %f, %f, %f, %f, %f, %f, %f\n", (double)y_coeffs[0],(double)y_coeffs[1],(double)y_coeffs[2],(double)y_coeffs[3],(double)y_coeffs[4],(double)y_coeffs[5],(double)y_coeffs[6]);
+							const float* z_coeffs = _z_path._polyList0[legNum].getCoeffs();
+							PX4_INFO("z coeffs: %f, %f, %f, %f, %f, %f, %f\n", (double)z_coeffs[0],(double)z_coeffs[1],(double)z_coeffs[2],(double)z_coeffs[3],(double)z_coeffs[4],(double)z_coeffs[5],(double)z_coeffs[6]);
+						}
 					}
 
 					/* get the usual dt estimate */
@@ -305,10 +357,17 @@ FixedwingFlatControl::vehicle_manual_poll()
 					float dt = (float)dt_micros * 1e-6f;
 
 					_s += dt*_flat_control.get_s_dot();
-					Vector3f posd = _init_vel*_s+_init_pos;
-					Vector3f veld = _init_vel;
-					Vector3f accd = Vector3f(0,0,0);
-					Vector3f jerd = Vector3f(0,0,0);
+					float xEval[4];
+					float yEval[4];
+					float zEval[4];
+					_x_path.getEval(_s,xEval);
+					_y_path.getEval(_s,yEval);
+					_z_path.getEval(_s,zEval);
+
+					Vector3f posd = Vector3f(xEval[0],yEval[0],zEval[0]);
+					Vector3f veld = Vector3f(xEval[1],yEval[1],zEval[1]);
+					Vector3f accd = Vector3f(xEval[2],yEval[2],zEval[2]);
+					Vector3f jerd = Vector3f(xEval[3],yEval[3],zEval[3]);
 
 					_flat_control.update_pos(pos,vel,acc);
 					_flat_control.update_pos_sp(posd,veld,accd,jerd);
@@ -343,12 +402,12 @@ FixedwingFlatControl::vehicle_manual_poll()
 						update_roll_act(0);
 						update_pitch_act(0);
 						update_yaw_act(0);
-						update_thrust(0,att,acc);
+						// update_thrust(0,att,acc);
 					}else{
 						update_roll_act(dt);
 						update_pitch_act(dt);
 						update_yaw_act(dt);
-						update_thrust(dt,att,acc);	
+						// update_thrust(dt,att,acc);	
 					}
 
 				// } else if (_vcontrol_mode.flag_control_rates_enabled &&

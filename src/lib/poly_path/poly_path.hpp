@@ -45,12 +45,20 @@
  *    
  */
 
+#ifndef POLY_PATH_H
+#define POLY_PATH_H
+
+#include <matrix/math.hpp>
+using matrix::Matrix;
+using matrix::SquareMatrix;
+
 template <int numCoeff>
 class Polynomial{
 	public:
 		Polynomial() = default; // Default constructor
 		Polynomial(float coeffs[]); // Construct from coefficients
 		Polynomial(const Polynomial<numCoeff> &orig); // Copy constructor
+		Polynomial<numCoeff> &operator=(const Polynomial<numCoeff> &orig); // Copy via = operator
 
 		Polynomial getDeriv(); // Return derivative of this polynomial
 		
@@ -65,8 +73,10 @@ class Polynomial{
 template <int numCoeff, int numPoly>
 class Poly_Path{
 	public:
+		Poly_Path() = default; // Default constructor
 		Poly_Path(float taus[], Polynomial<numCoeff> polyList[]); // Construct path from leg durations and corresponding polynomial
 		Poly_Path(float taus[], float ics[], float points[], float costs[]);
+		~Poly_Path();
 		void getEval(float t, float* derivs); // Evaluate a derivative of the path at t. Select order with derivs
 		Polynomial<numCoeff> _polyList0[numPoly]; // List of polynomials
 		Polynomial<numCoeff> _polyList1[numPoly]; // 1st derivative of _polyList0
@@ -81,4 +91,14 @@ class Poly_Path{
 
 		int _numCoeff;
 		int _numPoly;
+
+		// Heap allocations for *big* matrices used to compute optimal path 
+		#define BC_PER_LEG 8 // Number of boundary values per leg that are mapped from coefficients by matrix A 
+		Matrix<float, BC_PER_LEG*numPoly, numCoeff*numPoly>* _A = new Matrix<float, BC_PER_LEG*numPoly, numCoeff*numPoly>; // A in eq. 15 of Bry & Richter
+		Matrix<float, numCoeff*numPoly, BC_PER_LEG*numPoly>* _C = new Matrix<float, numCoeff*numPoly, BC_PER_LEG*numPoly>;
+		SquareMatrix<float, numCoeff*numPoly>* _Q_block = new SquareMatrix<float, numCoeff*numPoly>;
+		SquareMatrix<float, numCoeff*numPoly>* _ACT = new SquareMatrix<float, numCoeff*numPoly>;
+		SquareMatrix<float, numCoeff*numPoly>* _R = new SquareMatrix<float, numCoeff*numPoly>;
 };
+
+#endif /* POLY_PATH_H */

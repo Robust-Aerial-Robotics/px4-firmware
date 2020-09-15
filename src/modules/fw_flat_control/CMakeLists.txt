@@ -40,4 +40,5 @@ px4_add_module(
 	DEPENDS
 		px4_work_queue
 		flat_fw
+		poly_path
 	)

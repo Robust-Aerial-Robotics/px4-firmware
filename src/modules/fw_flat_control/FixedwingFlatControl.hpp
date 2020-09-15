@@ -59,6 +59,7 @@
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/uORB.h>
 #include <lib/flat_fw/ECL_Flat_Pos_Controller.hpp>
+#include <lib/poly_path/poly_path.cpp>
 
 class FixedwingFlatControl final : public ModuleBase<FixedwingFlatControl>, public ModuleParams,
 	public px4::WorkItem
@@ -170,10 +171,14 @@ private:
 
 	Vector3f _init_vel;
 	Vector3f _init_pos;
+	Poly_Path<7,4> _x_path;
+	Poly_Path<7,4> _y_path;
+	Poly_Path<7,4> _z_path;
 
 	ECL_Flat_Pos_Controller _flat_control;
 
 	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::FW_ACRO_HLD_LEN>) _param_fw_acro_hld_len,
 		(ParamFloat<px4::params::FW_ACRO_CLA>) _param_fw_acro_cLa,
 		(ParamFloat<px4::params::FW_ACRO_CL0>) _param_fw_acro_cL0,
 		(ParamFloat<px4::params::FW_ACRO_R>) _param_fw_acro_r,

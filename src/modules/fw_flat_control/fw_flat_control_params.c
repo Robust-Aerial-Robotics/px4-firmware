@@ -62,11 +62,11 @@ PARAM_DEFINE_FLOAT(FW_ACRO_FLAT_K1, 3.0f);
  */
 PARAM_DEFINE_FLOAT(FW_ACRO_FLAT_K2, 3.0f);
 
-/**
- * Acro gain: acceleration WRT body in thrust dir. error ==> thrust setpoint - cruising thrust.
- *
- */
-PARAM_DEFINE_FLOAT(FW_ACRO_AT_GAIN, 1.0f);
+// *
+//  * Acro gain: acceleration WRT body in thrust dir. error ==> thrust setpoint - cruising thrust.
+//  *
+ 
+// PARAM_DEFINE_FLOAT(FW_ACRO_AT_GAIN, 1.0f);
 
 /**
  * Acro lift curve slope for dynamic inversion (forces are in newtons).
@@ -103,3 +103,9 @@ PARAM_DEFINE_FLOAT(FW_ACRO_AREF, 0.39755f);
  *
  */
 PARAM_DEFINE_FLOAT(FW_ACRO_RHO, 1.2041f);
+
+/**
+ * Distance between waypoints in square pattern for holding (m).
+ *
+ */
+PARAM_DEFINE_FLOAT(FW_ACRO_HLD_LEN, 200.0f);
