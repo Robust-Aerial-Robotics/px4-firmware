@@ -74,9 +74,9 @@ template <int numCoeff, int numPoly>
 class Poly_Path{
 	public:
 		Poly_Path() = default; // Default constructor
-		Poly_Path(float taus[], Polynomial<numCoeff> polyList[]); // Construct path from leg durations and corresponding polynomial
-		Poly_Path(float taus[], float ics[], float points[], float costs[]);
 		~Poly_Path();
+		void update(float taus[], Polynomial<numCoeff> polyList[]); // Construct path from leg durations and corresponding polynomial
+		void update(float taus[], float ics[], float points[], float costs[]);
 		void getEval(float t, float* derivs); // Evaluate a derivative of the path at t. Select order with derivs
 		Polynomial<numCoeff> _polyList0[numPoly]; // List of polynomials
 		Polynomial<numCoeff> _polyList1[numPoly]; // 1st derivative of _polyList0
@@ -93,12 +93,18 @@ class Poly_Path{
 		int _numPoly;
 
 		// Heap allocations for *big* matrices used to compute optimal path 
-		#define BC_PER_LEG 8 // Number of boundary values per leg that are mapped from coefficients by matrix A 
+		#define BC_PER_LEG 8 // Number of boundary values per leg that are mapped from coefficients by matrix A
+		#define FIXED_COND_PER_LEG 5 // Number of conditions per leg that are inputs to optimization ("specified")
+		#define FREE_COND_PER_LEG 2 // Number of conditions per leg that are outputs of optimization ("free" or "optimized")
+		static const int fSize{FIXED_COND_PER_LEG*numPoly};
+		static const int pSize{FREE_COND_PER_LEG*numPoly};
 		Matrix<float, BC_PER_LEG*numPoly, numCoeff*numPoly>* _A = new Matrix<float, BC_PER_LEG*numPoly, numCoeff*numPoly>; // A in eq. 15 of Bry & Richter
 		Matrix<float, numCoeff*numPoly, BC_PER_LEG*numPoly>* _C = new Matrix<float, numCoeff*numPoly, BC_PER_LEG*numPoly>;
 		SquareMatrix<float, numCoeff*numPoly>* _Q_block = new SquareMatrix<float, numCoeff*numPoly>;
 		SquareMatrix<float, numCoeff*numPoly>* _ACT = new SquareMatrix<float, numCoeff*numPoly>;
 		SquareMatrix<float, numCoeff*numPoly>* _R = new SquareMatrix<float, numCoeff*numPoly>;
+		Matrix<float, fSize, pSize>* _R_fp = new Matrix<float, fSize, pSize>;
+		SquareMatrix<float, pSize>* _R_pp = new SquareMatrix<float, pSize>;
 };
 
 #endif /* POLY_PATH_H */

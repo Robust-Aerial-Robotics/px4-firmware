@@ -89,7 +89,7 @@ float Polynomial<numCoeff>::getEval(float t){
 }
 
 template <int numCoeff, int numPoly>
-Poly_Path<numCoeff, numPoly>::Poly_Path(float taus[], Polynomial<numCoeff> polyList[]){
+void Poly_Path<numCoeff, numPoly>::update(float taus[], Polynomial<numCoeff> polyList[]){
 	_numPoly = numPoly;
 	_numCoeff = numCoeff;
 
@@ -105,7 +105,7 @@ Poly_Path<numCoeff, numPoly>::Poly_Path(float taus[], Polynomial<numCoeff> polyL
 }
 
 template <int numCoeff, int numPoly>
-Poly_Path<numCoeff, numPoly>::Poly_Path(float taus[], float ics[], float points[], float costs[]){
+void Poly_Path<numCoeff, numPoly>::update(float taus[], float ics[], float points[], float costs[]){
 	_numPoly = numPoly;
 	_numCoeff = numCoeff;
 	_taus[0] = taus[0];
@@ -138,14 +138,12 @@ Poly_Path<numCoeff, numPoly>::Poly_Path(float taus[], float ics[], float points[
 	// to the vector of conditions that define the polynomials: [b_F^T, b_P^T]^T
 
 	// First leg conditions
-	#define FIXED_COND_PER_LEG 5 // Number of conditions per leg that are inputs to optimization ("specified")
 	_C->operator()(0, 0) = 1; // Specify P^(0)(0)_0
 	_C->operator()(1, 1) = 1; // Specify P^(1)(0)_0
 	_C->operator()(2, 2) = 1; // Specify P^(2)(0)_0
 	_C->operator()(3, 3) = 1; // Specify P^(3)(0)_0
 	_C->operator()(4, 4) = 1; // Specify P^(3)(tau)_0
 
-	#define FREE_COND_PER_LEG 2 // Number of conditions per leg that are outputs of optimization ("free" or "optimized")
 	_C->operator()(5 +(numPoly-1)*FIXED_COND_PER_LEG, 5) = 1; // Optimize P(1)(tau)_0
 	_C->operator()(6 +(numPoly-1)*FIXED_COND_PER_LEG, 6) = 1; // Optimize P(2)(tau)_0
 
@@ -178,11 +176,11 @@ Poly_Path<numCoeff, numPoly>::Poly_Path(float taus[], float ics[], float points[
 					float common_multiple = costs[r]*(2*pi_prod/float(i+l-2*r+1));
 					if(r==0){ // Initialize if it is the first time touching this element
 						for(int legNumber=0; legNumber<numPoly; legNumber++){
-							Q[legNumber][i][l] = common_multiple*std::pow(taus[legNumber], (float)i+l-2*r+1);
+							Q[legNumber][i][l] = common_multiple*(float)std::pow(taus[legNumber], (float)i+l-2*r+1);
 						}
 					}else{ // Add on if it is not the first time touching this element
 						for(int legNumber=0; legNumber<numPoly; legNumber++){
-							Q[legNumber][i][l] += common_multiple*std::pow(taus[legNumber], (float)i+l-2*r+1);
+							Q[legNumber][i][l] += common_multiple*(float)std::pow(taus[legNumber], (float)i+l-2*r+1);
 						}	
 					}
 				}
@@ -203,12 +201,10 @@ Poly_Path<numCoeff, numPoly>::Poly_Path(float taus[], float ics[], float points[
 
 	*_R = _ACT->T()*(_Q_block->operator*(*_ACT));
 
-	const int fSize = FIXED_COND_PER_LEG*numPoly;
-	const int pSize = FREE_COND_PER_LEG*numPoly;
 	// Matrix<float, fSize, fSize> R_ff(R.slice<fSize,fSize>(0,0)); 
-	Matrix<float, fSize, pSize> R_fp(_R->template slice<fSize,pSize>(0,fSize)); 
+	*_R_fp = _R->template slice<fSize,pSize>(0,fSize); 
 	// Matrix<float, pSize, fSize> R_pf(R.slice<pSize,fSize>(fSize,0)); 
-	SquareMatrix<float, pSize> R_pp(_R->template slice<pSize,pSize>(fSize,fSize)); 
+	*_R_pp = _R->template slice<pSize,pSize>(fSize,fSize); 
 
 	Vector<float, fSize> b_F;
 	b_F.setZero();
@@ -219,7 +215,7 @@ Poly_Path<numCoeff, numPoly>::Poly_Path(float taus[], float ics[], float points[
 		b_F(4+i*FIXED_COND_PER_LEG) = points[i];
 	}
 
-	Vector<float, pSize> b_P = -R_pp.I()*R_fp.T()*b_F;
+	Vector<float, pSize> b_P = -_R_pp->I()*_R_fp->T()*b_F;
 	Vector<float, numCoeff*numPoly> p = _ACT->operator*(b_F.vcat(b_P));
 
 	float newCoeffs[numCoeff];
@@ -240,6 +236,8 @@ Poly_Path<numCoeff, numPoly>::~Poly_Path(){
 	delete _Q_block;
 	delete _ACT;
 	delete _R;
+	delete _R_fp;
+	delete _R_pp;
 }
 
 template <int numCoeff, int numPoly>

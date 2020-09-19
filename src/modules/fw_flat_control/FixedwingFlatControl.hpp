@@ -171,9 +171,10 @@ private:
 
 	Vector3f _init_vel;
 	Vector3f _init_pos;
-	Poly_Path<7,4> _x_path;
-	Poly_Path<7,4> _y_path;
-	Poly_Path<7,4> _z_path;
+	#define NUM_LEGS 8
+	Poly_Path<7,NUM_LEGS> _x_path;
+	Poly_Path<7,NUM_LEGS> _y_path;
+	Poly_Path<7,NUM_LEGS> _z_path;
 
 	ECL_Flat_Pos_Controller _flat_control;
 

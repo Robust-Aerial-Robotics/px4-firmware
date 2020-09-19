@@ -66,7 +66,8 @@ static constexpr wq_config_t I2C4{"wq:I2C4", 1472, -12};
 
 // PX4 att/pos controllers, highest priority after sensors.
 static constexpr wq_config_t attitude_ctrl{"wq:attitude_ctrl", 1640, -13};
-static constexpr wq_config_t nav_and_controllers{"wq:nav_and_controllers", 7200, -14};
+#define POLY_PATH_STACK_REQ 30000 // Additional stack size necessary for ~8 point 6th order 3D path generation.
+static constexpr wq_config_t nav_and_controllers{"wq:nav_and_controllers", 7200 + POLY_PATH_STACK_REQ, -14}; // TODO: Reduce poly_path memory usage and analyze memory usage vs. availability on boards
 
 static constexpr wq_config_t hp_default{"wq:hp_default", 1900, -15};
 
