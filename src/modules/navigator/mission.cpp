@@ -35,6 +35,8 @@
  *
  * Helper class to access missions
  *
+ * Original navigator authored by:
+ *
  * @author Julian Oes <julian@oes.ch>
  * @author Thomas Gubler <thomasgubler@gmail.com>
  * @author Anton Babushkin <anton.babushkin@me.com>
@@ -43,6 +45,11 @@
  * @author Andreas Antener <andreas@uaventure.com>
  * @author Sander Smeets <sander@droneslab.com>
  * @author Lorenz Meier <lorenz@px4.io>
+ *
+ * Modified to process multiple waypoints simultaneously by:
+ *
+ * @author Kevin Cohen <kevincohen35@gmail.com>
+ *
  */
 
 #include "mission.h"
@@ -165,6 +172,7 @@ Mission::on_activation()
 	_execution_mode_changed = false;
 
 	set_mission_items();
+	read_all_pts();
 
 	// unpause triggering if it was paused
 	vehicle_command_s cmd = {};
@@ -206,6 +214,7 @@ Mission::on_active()
 
 		_execution_mode_changed = false;
 		set_mission_items();
+		read_all_pts();
 	}
 
 	/* lets check if we reached the current mission item */
@@ -220,6 +229,7 @@ Mission::on_active()
 			/* switch to next waypoint if 'autocontinue' flag set */
 			advance_mission();
 			set_mission_items();
+			read_all_pts();
 		}
 
 	} else if (_mission_type != MISSION_TYPE_NONE && _param_mis_altmode.get() == MISSION_ALTMODE_FOH) {
@@ -1640,6 +1650,33 @@ Mission::read_mission_item(int offset, struct mission_item_s *mission_item)
 	/* we have given up, we don't want to cycle forever */
 	mavlink_log_critical(_navigator->get_mavlink_log_pub(), "DO JUMP is cycling, giving up.");
 	return false;
+}
+
+bool
+Mission::read_all_pts()
+{
+	multi_waypoint_s *multi_waypoint = _navigator->get_multi_waypoint();
+	struct mission_item_s mission_item_tmp;
+
+	// Go through all mission items starting with the current. Fill 8 mission items max or until we run out of defined mission items. 
+	int waypoint_ind = 0;
+	for (int offset=0; waypoint_ind<7 && offset<((int)_mission.count - _current_mission_index); offset++) {
+		if (!read_mission_item(offset, &mission_item_tmp)) {
+			multi_waypoint->valid_pts = waypoint_ind;
+			_navigator->set_multi_waypoint_updated();
+			return false;
+		}
+		if(mission_item_tmp.nav_cmd == NAV_CMD_WAYPOINT) {
+			multi_waypoint->lat_pts[waypoint_ind] = mission_item_tmp.lat;
+			multi_waypoint->lon_pts[waypoint_ind] = mission_item_tmp.lon;
+			multi_waypoint->alt_pts[waypoint_ind] = mission_item_tmp.altitude;
+			waypoint_ind++;
+		}
+	}
+	multi_waypoint->valid_pts = waypoint_ind;
+	_navigator->set_multi_waypoint_updated();
+
+	return true;
 }
 
 void

@@ -38,6 +38,7 @@
  */
 
 #include "FixedwingFlatControl.hpp"
+#include <lib/ecl/geo/geo.h>
 using math::max;
 using math::min;
 using math::constrain;
@@ -118,6 +119,19 @@ FixedwingFlatControl::parameters_update()
 	// _wheel_ctrl.set_integrator_max(_param_fw_wr_imax.get());
 	// _wheel_ctrl.set_max_rate(radians(_param_fw_w_rmax.get()));
 
+	// Landing slope
+	/* check if negative value for 2/3 of flare altitude is set for throttle cut */
+	float land_thrust_lim_alt_relative = _param_fw_lnd_tlalt.get();
+
+	if (land_thrust_lim_alt_relative < 0.0f) {
+		land_thrust_lim_alt_relative = 0.66f * _param_fw_lnd_flalt.get();
+	}
+
+	_landingslope.update(radians(_param_fw_lnd_ang.get()), _param_fw_lnd_flalt.get(), land_thrust_lim_alt_relative,
+			     _param_fw_lnd_hvirt.get());
+
+	landing_status_publish();
+
 	return PX4_OK;
 }
 
@@ -161,8 +175,80 @@ FixedwingFlatControl::Run()
 	perf_begin(_loop_perf);
 
 	if (_att_sub.update(&_att)){
+		perf_end(_flat_freq_perf);
+		perf_begin(_flat_freq_perf);
+
+		_local_pos_sub.copy(&_local_pos);
+		_vehicle_rates_sub.copy(&_ang_vel);
+
+		_pos = Vector3f(_local_pos.x, _local_pos.y, _local_pos.z);
+		_vel = Vector3f(_local_pos.vx, _local_pos.vy, _local_pos.vz);
+		_acc = Vector3f(_local_pos.ax, _local_pos.ay, _local_pos.az);
+
+		_att_quat = Quatf(_att.q); // Array to quaternion object
+		_attr = Vector3f(_ang_vel.xyz); // Array to vector object
+
+		waypoint_poll();
 		vehicle_control_mode_poll();
 		vehicle_manual_poll();
+		vehicle_auto_poll();
+
+		/* If not in pure manual mode, use diff. flat control system */
+		if (_vcontrol_mode.flag_control_attitude_enabled){
+			/* get the usual dt estimate */
+			uint64_t dt_micros = hrt_elapsed_time(&_last_run);
+			_last_run = hrt_absolute_time();
+			float dt = (float)dt_micros * 1e-6f;
+
+			_s += dt*_flat_control.get_s_dot();
+			float xEval[4];
+			float yEval[4];
+			float zEval[4];
+			_x_path.getEval(_s,xEval);
+			_y_path.getEval(_s,yEval);
+			_z_path.getEval(_s,zEval);
+
+			Vector3f posd = Vector3f(xEval[0],yEval[0],zEval[0]);
+			Vector3f veld = Vector3f(xEval[1],yEval[1],zEval[1]);
+			Vector3f accd = Vector3f(xEval[2],yEval[2],zEval[2]);
+			Vector3f jerd = Vector3f(xEval[3],yEval[3],zEval[3]);
+
+			_flat_control.update_pos(_pos,_vel,_acc);
+			_flat_control.update_pos_sp(posd,veld,accd,jerd);
+			_flat_control.update_att(_att_quat);
+			_flat_control.update_attr(_attr);
+			_flat_control.calc_all();
+
+			_omega_b_sp = _flat_control.get_omega_b_setpoint();
+
+			// matrix::Eulerf euler_att = matrix::Eulerf(att);
+			// PX4_INFO("Body Rate: %f, %f, %f", (double)_attr(0), (double)_attr(1), (double)_attr(2));
+			// PX4_INFO("Euler Angles: %f, %f, %f", (double)euler_att.phi(), (double)euler_att.theta(), (double)euler_att.psi());
+			// PX4_INFO("Actual pos.: %f, %f, %f", (double)pos(0), (double)pos(1), (double)pos(2));
+			// PX4_INFO("Desired pos.: %f, %f, %f", (double)posd(0), (double)posd(1), (double)posd(2));
+			// PX4_INFO("Actual vel.: %f, %f, %f", (double)vel(0), (double)vel(1), (double)vel(2));
+			// PX4_INFO("Desired vel.: %f, %f, %f", (double)veld(0), (double)veld(1), (double)veld(2));
+			// PX4_INFO("Actual acc.: %f, %f, %f", (double)acc(0), (double)acc(1), (double)acc(2));
+			// PX4_INFO("Desired acc.: %f, %f, %f", (double)accd(0), (double)accd(1), (double)accd(2));
+			// PX4_INFO("THRUSTR SP: %f", (double)_thrustr_sp);
+
+			perf_end(_attr_freq_perf);
+			perf_begin(_attr_freq_perf);
+			get_airspeed_and_update_scaling();
+
+			/* zero time integration of this step for long intervals*/
+			if(dt > 500000){
+				update_roll_act(0);
+				update_pitch_act(0);
+				update_yaw_act(0);
+				// update_thrust(0,att,acc);
+			}else{
+				update_roll_act(dt);
+				update_pitch_act(dt);
+				update_yaw_act(dt);
+				// update_thrust(dt,att,acc);	
+			}
+		}
 
 		/* lazily publish the setpoint only once available */
 		_actuators.timestamp = hrt_absolute_time();
@@ -234,6 +320,45 @@ float FixedwingFlatControl::get_airspeed_and_update_scaling()
 }
 
 void
+FixedwingFlatControl::waypoint_poll()
+{
+	if (_multi_waypoint_sub.update(&_multi_waypoint)) {
+		if (!map_projection_global_initialized())
+			globallocalconverter_init(_local_pos.ref_lat, _local_pos.ref_lon, _local_pos.ref_alt, _local_pos.timestamp);
+
+		for (int i=0; i<(NUM_LEGS-1); i++) {
+			if (i<_multi_waypoint.valid_pts) {
+				int converted = globallocalconverter_tolocal(
+					_multi_waypoint.lat_pts[i], _multi_waypoint.lon_pts[i], _multi_waypoint.alt_pts[i],
+					&_x_pts[i+1], &_y_pts[i+1], &_z_pts[i+1]
+				); // TODO: Make sure that the current mapping ref is same as local_pos sub's ref.
+				
+				if (converted == -1)
+					PX4_WARN("Could not convert coordinates to local position.\n");
+
+				Vector3f last_pt(_x_pts[i], _y_pts[i], _z_pts[i]);
+				Vector3f curr_pt(_x_pts[i+1], _y_pts[i+1], _z_pts[i+1]);
+				_lens[i+1] = (curr_pt-last_pt).norm();
+
+			/* Linearly extrapolate waypoints */
+			} else {
+				if (i > 2){
+				_x_pts[i+1] = 2*_x_pts[i] - _x_pts[i-1];
+				_y_pts[i+1] = 2*_y_pts[i] - _y_pts[i-1];
+				_z_pts[i+1] = 2*_z_pts[i] - _z_pts[i-1];
+				_lens[i+1] = _lens[i];
+
+				} else {
+					PX4_ERR("Not enough waypoints specified.\n");
+				
+				}
+			}
+		}
+		_loaded_waypoints = true;
+	}
+}
+
+void
 FixedwingFlatControl::vehicle_manual_poll()
 {
 	if(!_started_manual){	
@@ -266,26 +391,11 @@ FixedwingFlatControl::vehicle_manual_poll()
 						PX4_INFO("STARTED STABLE ATT CONTROL\n");
 						_started_stable = true;
 					}
-					// STABILIZED mode fly in a straight line at constant altitude
-
-					perf_end(_flat_freq_perf);
-					perf_begin(_flat_freq_perf);
-
-					_local_pos_sub.copy(&_local_pos);
-					_vehicle_rates_sub.copy(&_ang_vel);
-
-					Vector3f pos = Vector3f(_local_pos.x, _local_pos.y, _local_pos.z);
-					Vector3f vel = Vector3f(_local_pos.vx, _local_pos.vy, _local_pos.vz);
-					Vector3f acc = Vector3f(_local_pos.ax, _local_pos.ay, _local_pos.az);
-
-					Quatf att = Quatf(_att.q);
-					_attr = Vector3f(_ang_vel.xyz);
+					// STABILIZED mode fly over 8 points in a square
 
 					if(_init_stable){
 						PX4_INFO("Initialized stabilizer.\n");
 						_init_stable = false;
-						_init_vel = Vector3f(vel(0),vel(1),0);
-						_init_pos = pos;
 
 						_int_rollr = 0.0f;
 						_int_pitchr = 0.0f;
@@ -294,54 +404,44 @@ FixedwingFlatControl::vehicle_manual_poll()
 						_rollr_act_sp = 0.0f;
 						_pitchr_act_sp = 0.0f;
 						_yawr_act_sp = 0.0f;
-						// _aT_sp = 0.0f;
 
 						_last_run = hrt_absolute_time();
 						_s = 0;
 
 						float legLen = _param_fw_acro_hld_len.get();
-
-						// Build matrix to rotate square points based path template
-						// Vector2f init_dir = Vector2f(_init_vel(0),_init_vel(1));
-						// init_dir = init_dir/init_dir.norm();
-
-						float hdg = atan2(_init_vel(1),_init_vel(0));
+						float hdg = atan2(_vel(1),_vel(0));
 						float pathRot_data[2][2] =	{
 													{(float)cos(hdg),(float)-sin(hdg)},
 													{(float)sin(hdg), (float)cos(hdg)},
 													};
 						matrix::SquareMatrix<float, 2> pathRot(pathRot_data);
 
-						Vector2f pathOffset(_init_pos(0),_init_pos(1));
+						Vector2f pathOffset(_pos(0), _pos(1));
 
 						Vector2f pt1 = pathRot*Vector2f(legLen	,0		)	+ pathOffset;
 						Vector2f pt2 = pathRot*Vector2f(legLen	,legLen	)	+ pathOffset;
 						Vector2f pt3 = pathRot*Vector2f(0		,legLen	)	+ pathOffset;
 						Vector2f pt4 = pathRot*Vector2f(0		,0		)	+ pathOffset;
 
-						float tau = legLen/vel.norm();
-						float taus[NUM_LEGS] = {tau,tau,tau,tau,tau,tau,tau,tau};
-						float costs[7] = {0,0,1,1,0,0,0};
-
-						// PX4_INFO("x_pts: %f, %f, %f, %f\n", (double)x_pts[0],(double)x_pts[1],(double)x_pts[2],(double)x_pts[3]);
-						// PX4_INFO("x_ics: %f, %f, %f, %f\n", (double)x_ics[0],(double)x_ics[1],(double)x_ics[2],(double)x_ics[3]);
-						// PX4_INFO("costs: %f, %f, %f, %f, %f, %f, %f\n", (double)costs[0],(double)costs[1],(double)costs[2],(double)costs[3],(double)costs[4],(double)costs[5],(double)costs[6]);
-						// PX4_INFO("taus: %f, %f, %f, %f\n", (double)taus[0],(double)taus[1],(double)taus[2],(double)taus[3]);
+						float tau = legLen/_vel.norm();
+						float taus_stab[NUM_LEGS];
+						for (int i=0; i<NUM_LEGS; i++)
+							taus_stab[i] = tau;
 						
-						float x_pts[NUM_LEGS] = {pt1(0),pt2(0),pt3(0),pt4(0),pt1(0),pt2(0),pt3(0),pt4(0)};
-						float x_ics[4] = {pos(0),vel(0),acc(0),0}; // TODO: account for initial jerk
-						_x_path.update(taus, x_ics, x_pts, costs);
+						float x_pts_stab[NUM_LEGS] = {pt1(0),pt2(0),pt3(0),pt4(0),pt1(0),pt2(0),pt3(0),pt4(0)};
+						float x_ics[4] = {_pos(0),_vel(0),_acc(0),0}; // TODO: account for initial jerk
+						_x_path.update(taus_stab, x_ics, x_pts_stab, _costs);
 
-						float y_pts[NUM_LEGS] = {pt1(1),pt2(1),pt3(1),pt4(1),pt1(1),pt2(1),pt3(1),pt4(1)};
-						float y_ics[4] = {pos(1),vel(1),acc(1),0}; // TODO: account for initial jerk
-						_y_path.update(taus, y_ics, y_pts, costs);
+						float y_pts_stab[NUM_LEGS] = {pt1(1),pt2(1),pt3(1),pt4(1),pt1(1),pt2(1),pt3(1),pt4(1)};
+						float y_ics[4] = {_pos(1),_vel(1),_acc(1),0}; // TODO: account for initial jerk
+						_y_path.update(taus_stab, y_ics, y_pts_stab, _costs);
 						
-						float z_pts[NUM_LEGS] = {pos(2),pos(2),pos(2),pos(2),pos(2),pos(2),pos(2),pos(2)};
-						float z_ics[4] = {pos(2),vel(2),acc(2),0}; // TODO: account for initial jerk
-						_z_path.update(taus, z_ics, z_pts, costs); // TODO: there may be a better set of weights for the z-direction
+						float z_pts_stab[NUM_LEGS] = {_pos(2),_pos(2),_pos(2),_pos(2),_pos(2),_pos(2),_pos(2),_pos(2)};
+						float z_ics[4] = {_pos(2),_vel(2),_acc(2),0}; // TODO: account for initial jerk
+						_z_path.update(taus_stab, z_ics, z_pts_stab, _costs); // TODO: there may be a better set of weights for the z-direction
 						
 
-						for(int legNum=0; legNum<4; legNum++){
+						for(int legNum=0; legNum<NUM_LEGS; legNum++){
 							const float* x_coeffs = _x_path._polyList0[legNum].getCoeffs();
 							PX4_INFO("x coeffs: %f, %f, %f, %f, %f, %f, %f\n", (double)x_coeffs[0],(double)x_coeffs[1],(double)x_coeffs[2],(double)x_coeffs[3],(double)x_coeffs[4],(double)x_coeffs[5],(double)x_coeffs[6]);
 							const float* y_coeffs = _y_path._polyList0[legNum].getCoeffs();
@@ -349,65 +449,6 @@ FixedwingFlatControl::vehicle_manual_poll()
 							const float* z_coeffs = _z_path._polyList0[legNum].getCoeffs();
 							PX4_INFO("z coeffs: %f, %f, %f, %f, %f, %f, %f\n", (double)z_coeffs[0],(double)z_coeffs[1],(double)z_coeffs[2],(double)z_coeffs[3],(double)z_coeffs[4],(double)z_coeffs[5],(double)z_coeffs[6]);
 						}
-					}
-
-					/* get the usual dt estimate */
-					uint64_t dt_micros = hrt_elapsed_time(&_last_run);
-					_last_run = hrt_absolute_time();
-					float dt = (float)dt_micros * 1e-6f;
-
-					_s += dt*_flat_control.get_s_dot();
-					float xEval[4];
-					float yEval[4];
-					float zEval[4];
-					_x_path.getEval(_s,xEval);
-					_y_path.getEval(_s,yEval);
-					_z_path.getEval(_s,zEval);
-
-					Vector3f posd = Vector3f(xEval[0],yEval[0],zEval[0]);
-					Vector3f veld = Vector3f(xEval[1],yEval[1],zEval[1]);
-					Vector3f accd = Vector3f(xEval[2],yEval[2],zEval[2]);
-					Vector3f jerd = Vector3f(xEval[3],yEval[3],zEval[3]);
-
-					_flat_control.update_pos(pos,vel,acc);
-					_flat_control.update_pos_sp(posd,veld,accd,jerd);
-					_flat_control.update_att(att);
-					_flat_control.update_attr(_attr);
-					_flat_control.calc_all();
-
-					_omega_b_sp = _flat_control.get_omega_b_setpoint();
-
-					// matrix::Eulerf euler_att = matrix::Eulerf(att);
-					// PX4_INFO("Body Rate: %f, %f, %f", (double)_attr(0), (double)_attr(1), (double)_attr(2));
-					// PX4_INFO("Euler Angles: %f, %f, %f", (double)euler_att.phi(), (double)euler_att.theta(), (double)euler_att.psi());
-					// PX4_INFO("Actual pos.: %f, %f, %f", (double)pos(0), (double)pos(1), (double)pos(2));
-					// PX4_INFO("Desired pos.: %f, %f, %f", (double)posd(0), (double)posd(1), (double)posd(2));
-					// PX4_INFO("Actual vel.: %f, %f, %f", (double)vel(0), (double)vel(1), (double)vel(2));
-					// PX4_INFO("Desired vel.: %f, %f, %f", (double)veld(0), (double)veld(1), (double)veld(2));
-					// PX4_INFO("Actual acc.: %f, %f, %f", (double)acc(0), (double)acc(1), (double)acc(2));
-					// PX4_INFO("Desired acc.: %f, %f, %f", (double)accd(0), (double)accd(1), (double)accd(2));
-					// PX4_INFO("THRUSTR SP: %f", (double)_thrustr_sp);
-
-					if(!_started_stabler){	
-						PX4_INFO("STARTED STABLE RATE CONTROL\n");
-						_started_stabler = true;
-					}
-
-					perf_end(_attr_freq_perf);
-					perf_begin(_attr_freq_perf);
-					get_airspeed_and_update_scaling();
-
-					/* zero time integration of this step for long intervals*/
-					if(dt > 500000){
-						update_roll_act(0);
-						update_pitch_act(0);
-						update_yaw_act(0);
-						// update_thrust(0,att,acc);
-					}else{
-						update_roll_act(dt);
-						update_pitch_act(dt);
-						update_yaw_act(dt);
-						// update_thrust(dt,att,acc);	
 					}
 
 				// } else if (_vcontrol_mode.flag_control_rates_enabled &&
@@ -446,6 +487,75 @@ FixedwingFlatControl::vehicle_manual_poll()
 			}
 		}
 	}
+}
+
+void
+FixedwingFlatControl::vehicle_auto_poll()
+{
+	if (_vcontrol_mode.flag_control_auto_enabled && _vcontrol_mode.flag_control_attitude_enabled && _loaded_waypoints) {
+		if(_init_auto){
+			PX4_INFO("Initialized auto mission flight.\n");
+			_init_auto = false;
+
+			_int_rollr = 0.0f;
+			_int_pitchr = 0.0f;
+			_int_yawr = 0.0f;
+
+			_rollr_act_sp = 0.0f;
+			_pitchr_act_sp = 0.0f;
+			_yawr_act_sp = 0.0f;
+
+			_last_run = hrt_absolute_time();
+			_s = 0;
+
+			_lens[0] = (Vector3f(_x_pts[0], _y_pts[0], _z_pts[0]) - _pos).norm();
+			float spd = _vel.norm();
+			float taus[NUM_LEGS];
+			for (int i=0; i<NUM_LEGS; i++) {
+				taus[i] = _lens[i]/spd;
+			}
+
+			float x_ics[4] = {_pos(0),_vel(0),_acc(0),0}; // TODO: account for initial jerk
+			_x_path.update(taus, x_ics, _x_pts, _costs);
+
+			float y_ics[4] = {_pos(1),_vel(1),_acc(1),0}; // TODO: account for initial jerk
+			_y_path.update(taus, y_ics, _y_pts, _costs);
+
+			float z_pts_stab[NUM_LEGS] = {_pos(2),_pos(2),_pos(2),_pos(2),_pos(2),_pos(2),_pos(2),_pos(2)};
+			float z_ics[4] = {_pos(2),_vel(2),_acc(2),0}; // TODO: account for initial jerk
+			// _z_path.update(taus, z_ics, _z_pts, _costs); // TODO: there may be a better set of weights for the z-direction
+			_z_path.update(taus, z_ics, z_pts_stab, _costs); // TODO: there may be a better set of weights for the z-direction
+
+			for(int legNum=0; legNum<NUM_LEGS; legNum++){
+				const float* x_coeffs = _x_path._polyList0[legNum].getCoeffs();
+				PX4_INFO("x coeffs: %f, %f, %f, %f, %f, %f, %f\n", (double)x_coeffs[0],(double)x_coeffs[1],(double)x_coeffs[2],(double)x_coeffs[3],(double)x_coeffs[4],(double)x_coeffs[5],(double)x_coeffs[6]);
+				const float* y_coeffs = _y_path._polyList0[legNum].getCoeffs();
+				PX4_INFO("y coeffs: %f, %f, %f, %f, %f, %f, %f\n", (double)y_coeffs[0],(double)y_coeffs[1],(double)y_coeffs[2],(double)y_coeffs[3],(double)y_coeffs[4],(double)y_coeffs[5],(double)y_coeffs[6]);
+				const float* z_coeffs = _z_path._polyList0[legNum].getCoeffs();
+				PX4_INFO("z coeffs: %f, %f, %f, %f, %f, %f, %f\n", (double)z_coeffs[0],(double)z_coeffs[1],(double)z_coeffs[2],(double)z_coeffs[3],(double)z_coeffs[4],(double)z_coeffs[5],(double)z_coeffs[6]);
+			}
+		}
+	
+	} else {
+		if(!_init_auto)
+			_init_auto = true;
+	} 
+}
+
+void
+FixedwingFlatControl::landing_status_publish()
+{
+	position_controller_landing_status_s pos_ctrl_landing_status = {};
+
+	pos_ctrl_landing_status.slope_angle_rad = _landingslope.landing_slope_angle_rad();
+	pos_ctrl_landing_status.horizontal_slope_displacement = _landingslope.horizontal_slope_displacement();
+	pos_ctrl_landing_status.flare_length = _landingslope.flare_length();
+
+	pos_ctrl_landing_status.abort_landing = _land_abort;
+
+	pos_ctrl_landing_status.timestamp = hrt_absolute_time();
+
+	_pos_ctrl_landing_status_pub.publish(pos_ctrl_landing_status);
 }
 
 void FixedwingFlatControl::update_roll_act(float dt){

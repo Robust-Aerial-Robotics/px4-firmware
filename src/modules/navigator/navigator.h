@@ -68,6 +68,7 @@
 #include <uORB/topics/position_controller_landing_status.h>
 #include <uORB/topics/position_controller_status.h>
 #include <uORB/topics/position_setpoint_triplet.h>
+#include <uORB/topics/multi_waypoint.h>
 #include <uORB/topics/transponder_report.h>
 #include <uORB/topics/vehicle_command.h>
 #include <uORB/topics/vehicle_command_ack.h>
@@ -142,6 +143,7 @@ public:
 	 */
 	void		set_can_loiter_at_sp(bool can_loiter) { _can_loiter_at_sp = can_loiter; }
 	void		set_position_setpoint_triplet_updated() { _pos_sp_triplet_updated = true; }
+	void		set_multi_waypoint_updated() { _multi_waypoint_updated = true; }
 	void		set_mission_result_updated() { _mission_result_updated = true; }
 
 	/**
@@ -152,6 +154,7 @@ public:
 	struct position_setpoint_triplet_s *get_position_setpoint_triplet() { return &_pos_sp_triplet; }
 	struct position_setpoint_triplet_s *get_reposition_triplet() { return &_reposition_triplet; }
 	struct position_setpoint_triplet_s *get_takeoff_triplet() { return &_takeoff_triplet; }
+	struct multi_waypoint_s *get_multi_waypoint() { return &_multi_waypoint; }
 	struct vehicle_global_position_s *get_global_position() { return &_global_pos; }
 	struct vehicle_land_detected_s *get_land_detected() { return &_land_detected; }
 	struct vehicle_local_position_s *get_local_position() { return &_local_pos; }
@@ -338,6 +341,7 @@ private:
 	uORB::Publication<geofence_result_s>		_geofence_result_pub{ORB_ID(geofence_result)};
 	uORB::Publication<mission_result_s>		_mission_result_pub{ORB_ID(mission_result)};
 	uORB::Publication<position_setpoint_triplet_s>	_pos_sp_triplet_pub{ORB_ID(position_setpoint_triplet)};
+	uORB::Publication<multi_waypoint_s>	_multi_waypoint_pub{ORB_ID(multi_waypoint)};
 	uORB::Publication<vehicle_roi_s>		_vehicle_roi_pub{ORB_ID(vehicle_roi)};
 
 	orb_advert_t	_mavlink_log_pub{nullptr};	/**< the uORB advert to send messages over mavlink */
@@ -359,6 +363,7 @@ private:
 	// Publications
 	geofence_result_s				_geofence_result{};
 	position_setpoint_triplet_s			_pos_sp_triplet{};	/**< triplet of position setpoints */
+	multi_waypoint_s			_multi_waypoint{};	/**< Basic position info of up to 8 waypoints after and including current waypoint.*/
 	position_setpoint_triplet_s			_reposition_triplet{};	/**< triplet for non-mission direct position command */
 	position_setpoint_triplet_s			_takeoff_triplet{};	/**< triplet for non-mission direct takeoff command */
 	vehicle_roi_s					_vroi{};		/**< vehicle ROI */
@@ -371,6 +376,7 @@ private:
 	bool		_can_loiter_at_sp{false};			/**< flags if current position SP can be used to loiter */
 	bool		_pos_sp_triplet_updated{false};		/**< flags if position SP triplet needs to be published */
 	bool 		_pos_sp_triplet_published_invalid_once{false};	/**< flags if position SP triplet has been published once to UORB */
+	bool		_multi_waypoint_updated{false};		/**< flags if waypoint sequence needs to be published */
 	bool		_mission_result_updated{false};		/**< flags if mission result has seen an update */
 
 	NavigatorMode	*_navigation_mode{nullptr};		/**< abstract pointer to current navigation mode class */
@@ -402,6 +408,11 @@ private:
 	 * Publish a new position setpoint triplet for position controllers
 	 */
 	void		publish_position_setpoint_triplet();
+
+	/**
+	 * Publish new sequence of waypoint positions for position controller
+	 */
+	void		publish_multi_waypoint();
 
 	/**
 	 * Publish the mission result so commander and mavlink know what is going on

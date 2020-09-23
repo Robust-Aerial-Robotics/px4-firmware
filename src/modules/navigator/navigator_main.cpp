@@ -725,6 +725,10 @@ Navigator::run()
 			publish_position_setpoint_triplet();
 		}
 
+		if (_multi_waypoint_updated) {
+			publish_multi_waypoint();
+		}
+
 		if (_mission_result_updated) {
 			publish_mission_result();
 		}
@@ -776,6 +780,14 @@ Navigator::publish_position_setpoint_triplet()
 	_pos_sp_triplet.timestamp = hrt_absolute_time();
 	_pos_sp_triplet_pub.publish(_pos_sp_triplet);
 	_pos_sp_triplet_updated = false;
+}
+
+void
+Navigator::publish_multi_waypoint()
+{
+	_multi_waypoint.timestamp = hrt_absolute_time();
+	_multi_waypoint_pub.publish(_multi_waypoint);
+	_multi_waypoint_updated = false;
 }
 
 float

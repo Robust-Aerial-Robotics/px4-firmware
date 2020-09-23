@@ -66,7 +66,7 @@ void ECL_Flat_Pos_Controller::update_att(Quatf q_bdy_wrld){
 }
 
 void ECL_Flat_Pos_Controller::update_attr(Vector3f wrld_w_bdy){
-	_wrld_w_bdy = wrld_w_bdy;// Anguler velocity of body frame WRT world frame (expressed in frd coords).
+	_wrld_w_bdy = wrld_w_bdy;// Angular velocity of body frame WRT world frame (expressed in frd coords).
 }
 
 void ECL_Flat_Pos_Controller::calc_all(){

@@ -57,9 +57,12 @@
 #include <uORB/topics/vehicle_control_mode.h>
 #include <uORB/topics/vehicle_local_position.h>
 #include <uORB/topics/vehicle_status.h>
+#include <uORB/topics/multi_waypoint.h>
+#include <uORB/topics/position_controller_landing_status.h>
 #include <uORB/uORB.h>
 #include <lib/flat_fw/ECL_Flat_Pos_Controller.hpp>
 #include <lib/poly_path/poly_path.cpp>
+#include <lib/landing_slope/Landingslope.hpp>
 
 class FixedwingFlatControl final : public ModuleBase<FixedwingFlatControl>, public ModuleParams,
 	public px4::WorkItem
@@ -84,11 +87,17 @@ public:
 private:
 	void Run() override;
 
+	void waypoint_poll();
+
 	void vehicle_control_mode_poll();
 
 	void vehicle_manual_poll();
 
+	void vehicle_auto_poll();
+
 	int parameters_update();
+
+	void landing_status_publish();
 
 	float get_airspeed_and_update_scaling();
 
@@ -107,10 +116,12 @@ private:
 	uORB::Subscription _vcontrol_mode_sub{ORB_ID(vehicle_control_mode)};					///< control mode subscription
 	uORB::Subscription _manual_control_setpoint_sub{ORB_ID(manual_control_setpoint)};	///< notification of manual control updates
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};						///< vehicle status subscription
+	uORB::Subscription _multi_waypoint_sub{ORB_ID(multi_waypoint)};						///< waypoint pos. list subscription
 
 	uORB::SubscriptionData<airspeed_validated_s> _airspeed_validated_sub{ORB_ID(airspeed_validated)};
 
 	uORB::Publication<actuator_controls_s>		_actuators_0_pub;
+	uORB::Publication<position_controller_landing_status_s>	_pos_ctrl_landing_status_pub{ORB_ID(position_controller_landing_status)};	///< landing status publication
 
 	vehicle_attitude_s			_att {};
 	vehicle_local_position_s	_local_pos {};
@@ -120,6 +131,7 @@ private:
 	manual_control_setpoint_s	_manual_control_setpoint {};							///< r/c channel data
 	vehicle_control_mode_s		_vcontrol_mode {};										///< control mode
 	vehicle_status_s		_vehicle_status {};											///< vehicle status
+	multi_waypoint_s		_multi_waypoint {};											///< waypoint pos. list
 
 	perf_counter_t	_loop_perf;															///< loop performance counter
 	perf_counter_t	_flat_freq_perf;													///< perfomance counter for run frequency of diff. flat. algo. (attitude,pos=>attitude-rate s.p.)
@@ -130,6 +142,8 @@ private:
 	bool _started_stable{false};
 	bool _started_stabler{false};
 	bool _init_stable{false};
+	bool _init_auto{false};
+	bool _loaded_waypoints{false};
 
 	float _pitchr_k_p{0.0f};
 	float _pitchr_k_i{0.0f};
@@ -166,19 +180,62 @@ private:
 
 	Vector3f _g = Vector3f(0.0f,0.0f,9.80665f);
 
+	Quatf _att_quat;
 	Vector3f _attr;
 	Vector3f _omega_b_sp;
+	Vector3f _pos;
+	Vector3f _vel;
+	Vector3f _acc;
 
-	Vector3f _init_vel;
-	Vector3f _init_pos;
+	#define NUM_COEFF 7
 	#define NUM_LEGS 8
-	Poly_Path<7,NUM_LEGS> _x_path;
-	Poly_Path<7,NUM_LEGS> _y_path;
-	Poly_Path<7,NUM_LEGS> _z_path;
+	float _costs[NUM_COEFF] = {0,0,1,1,0,0,0};
+	float _x_pts[NUM_LEGS];
+	float _y_pts[NUM_LEGS];
+	float _z_pts[NUM_LEGS];
+	float _lens[NUM_LEGS];
+	Poly_Path<NUM_COEFF,NUM_LEGS> _x_path;
+	Poly_Path<NUM_COEFF,NUM_LEGS> _y_path;
+	Poly_Path<NUM_COEFF,NUM_LEGS> _z_path;
 
 	ECL_Flat_Pos_Controller _flat_control;
 
+	/* Landing */
+	bool _land_noreturn_horizontal{false};
+	bool _land_noreturn_vertical{false};
+	bool _land_stayonground{false};
+	bool _land_motor_lim{false};
+	bool _land_onslope{false};
+	bool _land_abort{false};
+
+	Landingslope _landingslope;
+
+	hrt_abstime _time_started_landing{0};			///< time at which landing started
+
+	float _t_alt_prev_valid{0};				///< last terrain estimate which was valid
+	hrt_abstime _time_last_t_alt{0};			///< time at which we had last valid terrain alt
+
+	float _flare_height{0.0f};				///< estimated height to ground at which flare started
+	float _flare_pitch_sp{0.0f};			///< Current forced (i.e. not determined using TECS) flare pitch setpoint
+	float _flare_curve_alt_rel_last{0.0f};
+	float _target_bearing{0.0f};				///< estimated height to ground at which flare started
+
+	bool _was_in_air{false};				///< indicated wether the plane was in the air in the previous interation*/
+	hrt_abstime _time_went_in_air{0};			///< time at which the plane went in the air
+
 	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::FW_LND_AIRSPD_SC>) _param_fw_lnd_airspd_sc,
+		(ParamFloat<px4::params::FW_LND_ANG>) _param_fw_lnd_ang,
+		(ParamFloat<px4::params::FW_LND_FL_PMAX>) _param_fw_lnd_fl_pmax,
+		(ParamFloat<px4::params::FW_LND_FL_PMIN>) _param_fw_lnd_fl_pmin,
+		(ParamFloat<px4::params::FW_LND_FLALT>) _param_fw_lnd_flalt,
+		(ParamFloat<px4::params::FW_LND_HHDIST>) _param_fw_lnd_hhdist,
+		(ParamFloat<px4::params::FW_LND_HVIRT>) _param_fw_lnd_hvirt,
+		(ParamFloat<px4::params::FW_LND_THRTC_SC>) _param_fw_thrtc_sc,
+		(ParamFloat<px4::params::FW_LND_TLALT>) _param_fw_lnd_tlalt,
+		(ParamBool<px4::params::FW_LND_EARLYCFG>) _param_fw_lnd_earlycfg,
+		(ParamBool<px4::params::FW_LND_USETER>) _param_fw_lnd_useter,
+
 		(ParamFloat<px4::params::FW_ACRO_HLD_LEN>) _param_fw_acro_hld_len,
 		(ParamFloat<px4::params::FW_ACRO_CLA>) _param_fw_acro_cLa,
 		(ParamFloat<px4::params::FW_ACRO_CL0>) _param_fw_acro_cL0,

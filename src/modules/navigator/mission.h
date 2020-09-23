@@ -40,6 +40,11 @@
  * @author Anton Babushkin <anton.babushkin@me.com>
  * @author Ban Siesta <bansiesta@gmail.com>
  * @author Lorenz Meier <lorenz@px4.io>
+ *
+ * Modified to process multiple waypoints simultaneously:
+ *
+ * @author Kevin Cohen <kevincohen35@gmail.com>
+ *
  */
 
 #pragma once
@@ -187,6 +192,13 @@ private:
 	 * @return true if successful
 	 */
 	bool read_mission_item(int offset, struct mission_item_s *mission_item);
+
+	/**
+	 * Read all upcoming mission item positions for simultaneous, multi-segment path planning
+	 *
+	 * @return true if successful
+	 */
+	bool read_all_pts();
 
 	/**
 	 * Save current mission state to dataman
